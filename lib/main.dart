@@ -29,7 +29,7 @@ class AlarmesMedicamentosApp extends StatelessWidget {
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF2196F3),
+          seedColor: const Color.fromARGB(255, 142, 216, 204),
           brightness: Brightness.light,
         ),
         cardTheme: CardThemeData(
@@ -63,7 +63,7 @@ class AlarmesMedicamentosApp extends StatelessWidget {
       darkTheme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF2196F3),
+          seedColor: const Color.fromARGB(255, 71, 154, 142),
           brightness: Brightness.dark,
         ),
         cardTheme: CardThemeData(
