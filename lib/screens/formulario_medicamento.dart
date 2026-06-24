@@ -5,6 +5,7 @@ import 'package:uuid/uuid.dart';
 import '../models/medicamento.dart';
 import '../models/medicamentos_provider.dart';
 import '../models/alarm_service.dart';
+import '../widgets/urgencia_cores.dart';
 
 class FormularioMedicamento extends StatefulWidget {
   final Medicamento? medicamentoParaEditar;
@@ -18,91 +19,124 @@ class FormularioMedicamento extends StatefulWidget {
 class _FormularioMedicamentoState extends State<FormularioMedicamento> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _nomeController;
-  late final TextEditingController _dosagemController;
   late final TextEditingController _observacoesController;
 
   TipoMedicamento _tipoSelecionado = TipoMedicamento.comprimido;
-  final List<DateTime> _horarios = [];
-  bool _salvando = false;
+  ModoAgendamento _modoAgendamento = ModoAgendamento.manual;
 
+  // Modo manual
+  final List<DateTime> _horarios = [];
+
+  // Modo ciclo
+  DateTime? _primeiraDose;
+  int _intervaloHoras = 8;
+
+  bool _salvando = false;
   bool get _editando => widget.medicamentoParaEditar != null;
+
+  // Frequências disponíveis para o dropdown (modo ciclo)
+  static const _frequencias = [1, 2, 3, 4, 6, 8, 12, 24];
 
   @override
   void initState() {
     super.initState();
     final med = widget.medicamentoParaEditar;
     _nomeController = TextEditingController(text: med?.nome ?? '');
-    _dosagemController = TextEditingController(text: med?.dosagem ?? '');
     _observacoesController = TextEditingController(
       text: med?.observacoes ?? '',
     );
     if (med != null) {
       _tipoSelecionado = med.tipo;
+      _modoAgendamento = med.modoAgendamento;
       _horarios.addAll(med.horarios);
+      _primeiraDose = med.primeiraDose;
+      _intervaloHoras = med.intervaloHoras ?? 8;
     }
   }
 
   @override
   void dispose() {
     _nomeController.dispose();
-    _dosagemController.dispose();
     _observacoesController.dispose();
     super.dispose();
   }
 
-  Future<void> _adicionarHorario() async {
-    final horario = await showTimePicker(
+  // ─── Seleção de hora ──────────────────────────────────────────────────────
+
+  Future<void> _selecionarHorario() async {
+    final picked = await showTimePicker(
       context: context,
       initialTime: TimeOfDay.now(),
-      helpText: 'Selecione o horário do alarme',
+      helpText: 'Horário da dose',
       confirmText: 'Confirmar',
       cancelText: 'Cancelar',
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: Theme.of(
+              context,
+            ).colorScheme.copyWith(primary: AppCores.longe),
+          ),
+          child: child!,
+        );
+      },
     );
 
-    if (horario != null && mounted) {
-      final agora = DateTime.now();
-      final novoHorario = DateTime(
-        agora.year,
-        agora.month,
-        agora.day,
-        horario.hour,
-        horario.minute,
-      );
+    if (picked == null || !mounted) return;
 
-      // Verificar duplicatas
-      final jaExiste = _horarios.any(
-        (h) => h.hour == novoHorario.hour && h.minute == novoHorario.minute,
-      );
+    final agora = DateTime.now();
+    final dt = DateTime(
+      agora.year,
+      agora.month,
+      agora.day,
+      picked.hour,
+      picked.minute,
+    );
 
-      if (jaExiste) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Esse horário já foi adicionado.')),
-          );
-        }
-        return;
-      }
-
-      setState(() {
-        _horarios.add(novoHorario);
-        _horarios.sort(
-          (a, b) => (a.hour * 60 + a.minute).compareTo(b.hour * 60 + b.minute),
-        );
-      });
+    if (_modoAgendamento == ModoAgendamento.ciclo) {
+      setState(() => _primeiraDose = dt);
+      return;
     }
+
+    final jaExiste = _horarios.any(
+      (h) => h.hour == dt.hour && h.minute == dt.minute,
+    );
+    if (jaExiste) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Esse horário já foi adicionado.')),
+        );
+      }
+      return;
+    }
+
+    setState(() {
+      _horarios.add(dt);
+      _horarios.sort(
+        (a, b) => (a.hour * 60 + a.minute).compareTo(b.hour * 60 + b.minute),
+      );
+    });
   }
 
-  void _removerHorario(int index) {
-    setState(() => _horarios.removeAt(index));
-  }
+  // ─── Salvar ───────────────────────────────────────────────────────────────
 
   Future<void> _salvar() async {
     if (!_formKey.currentState!.validate()) return;
 
-    if (_horarios.isEmpty) {
+    // Validação de horários conforme o modo
+    if (_modoAgendamento == ModoAgendamento.manual && _horarios.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Adicione pelo menos um horário de alarme.'),
+          content: Text('Adicione pelo menos um horário.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+    if (_modoAgendamento == ModoAgendamento.ciclo && _primeiraDose == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Selecione o horário da primeira dose.'),
           backgroundColor: Colors.orange,
         ),
       );
@@ -113,19 +147,23 @@ class _FormularioMedicamentoState extends State<FormularioMedicamento> {
 
     try {
       final provider = context.read<MedicamentosProvider>();
-      final uuid = const Uuid();
-
-      // Gerar alarmId baseado no timestamp para evitar colisões
       final alarmId = _editando
           ? widget.medicamentoParaEditar!.alarmId
           : DateTime.now().millisecondsSinceEpoch % 100000;
 
       final medicamento = Medicamento(
-        id: _editando ? widget.medicamentoParaEditar!.id : uuid.v4(),
+        id: _editando ? widget.medicamentoParaEditar!.id : const Uuid().v4(),
         nome: _nomeController.text.trim(),
-        dosagem: _dosagemController.text.trim(),
+        dosagem: _tipoSelecionado.nome,
         tipo: _tipoSelecionado,
-        horarios: _horarios,
+        modoAgendamento: _modoAgendamento,
+        horarios: _modoAgendamento == ModoAgendamento.manual ? _horarios : [],
+        primeiraDose: _modoAgendamento == ModoAgendamento.ciclo
+            ? _primeiraDose
+            : null,
+        intervaloHoras: _modoAgendamento == ModoAgendamento.ciclo
+            ? _intervaloHoras
+            : null,
         observacoes: _observacoesController.text.trim().isEmpty
             ? null
             : _observacoesController.text.trim(),
@@ -133,7 +171,6 @@ class _FormularioMedicamentoState extends State<FormularioMedicamento> {
         alarmId: alarmId,
       );
 
-      // Cancelar alarmes anteriores se estiver editando
       if (_editando) {
         await AlarmService.cancelarAlarmes(widget.medicamentoParaEditar!);
         await provider.atualizarMedicamento(medicamento);
@@ -141,7 +178,6 @@ class _FormularioMedicamentoState extends State<FormularioMedicamento> {
         await provider.adicionarMedicamento(medicamento);
       }
 
-      // Agendar novos alarmes
       await AlarmService.agendarAlarmes(medicamento);
 
       if (mounted) {
@@ -149,21 +185,16 @@ class _FormularioMedicamentoState extends State<FormularioMedicamento> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              _editando
-                  ? '${medicamento.nome} atualizado com sucesso!'
-                  : '${medicamento.nome} adicionado com sucesso!',
+              '${medicamento.nome} ${_editando ? 'atualizado' : 'adicionado'}!',
             ),
-            backgroundColor: Colors.green,
+            backgroundColor: AppCores.longe,
           ),
         );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erro ao salvar: $e'),
-            backgroundColor: Colors.red,
-          ),
+          SnackBar(content: Text('Erro: $e'), backgroundColor: Colors.red),
         );
       }
     } finally {
@@ -171,305 +202,511 @@ class _FormularioMedicamentoState extends State<FormularioMedicamento> {
     }
   }
 
+  // ─── Build ────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isWeb = screenWidth > 720;
+    final formWidth = isWeb ? 560.0 : double.infinity;
 
     return Scaffold(
+      backgroundColor: AppCores.fundo,
       appBar: AppBar(
-        title: Text(_editando ? 'Editar Medicamento' : 'Novo Medicamento'),
-        centerTitle: true,
-        backgroundColor: theme.colorScheme.primaryContainer,
-        foregroundColor: theme.colorScheme.onPrimaryContainer,
+        backgroundColor: AppCores.appBar,
+        foregroundColor: Colors.white,
         elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+        // Image.asset no topo do formulário, lado direito — igual ao wireframe
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: Image.asset(
+              'assets/images/medicine_banner.png',
+              height: 64,
+              errorBuilder: (_, __, ___) => const Icon(
+                Icons.health_and_safety,
+                color: Colors.white,
+                size: 48,
+              ),
+            ),
+          ),
+        ],
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // Header decorativo
-              _buildHeader(theme),
-
-              const SizedBox(height: 24),
-
-              // Nome do medicamento
-              TextFormField(
-                controller: _nomeController,
-                decoration: InputDecoration(
-                  labelText: 'Nome do medicamento *',
-                  hintText: 'Ex: Losartana, Vitamina D...',
-                  prefixIcon: const Icon(Icons.medication),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
+      body: Center(
+        child: SingleChildScrollView(
+          padding: EdgeInsets.symmetric(
+            horizontal: isWeb ? (screenWidth - formWidth) / 2 : 20,
+            vertical: 24,
+          ),
+          child: SizedBox(
+            width: formWidth,
+            child: Form(
+              key: _formKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // ── Nome do Medicamento ──────────────────────────────────
+                  _labelTexto('Nome do Medicamento:'),
+                  const SizedBox(height: 6),
+                  _campoTexto(
+                    controller: _nomeController,
+                    hint: 'Ex: Insulina NPH',
+                    validator: (v) => (v == null || v.trim().isEmpty)
+                        ? 'Informe o nome'
+                        : null,
                   ),
-                  filled: true,
-                ),
-                textCapitalization: TextCapitalization.words,
-                validator: (value) {
-                  if (value == null || value.trim().isEmpty) {
-                    return 'Informe o nome do medicamento';
-                  }
-                  if (value.trim().length < 2) {
-                    return 'Nome muito curto';
-                  }
-                  return null;
-                },
-              ),
 
-              const SizedBox(height: 16),
+                  const SizedBox(height: 16),
 
-              // Dosagem
-              TextFormField(
-                controller: _dosagemController,
-                decoration: InputDecoration(
-                  labelText: 'Dosagem *',
-                  hintText: 'Ex: 50mg, 1 comprimido, 5ml...',
-                  prefixIcon: const Icon(Icons.science),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
+                  // ── Dropdowns lado a lado ────────────────────────────────
+                  Row(
+                    children: [
+                      // Frequência / Modo de agendamento
+                      Expanded(child: _dropdownModo()),
+                      const SizedBox(width: 12),
+                      // Tipo de medicamento
+                      Expanded(child: _dropdownTipo()),
+                    ],
                   ),
-                  filled: true,
-                ),
-                validator: (value) {
-                  if (value == null || value.trim().isEmpty) {
-                    return 'Informe a dosagem';
-                  }
-                  return null;
-                },
-              ),
 
-              const SizedBox(height: 16),
+                  const SizedBox(height: 20),
 
-              // Tipo de medicamento - DropdownButtonFormField
-              DropdownButtonFormField<TipoMedicamento>(
-                value: _tipoSelecionado,
-                decoration: InputDecoration(
-                  labelText: 'Tipo do medicamento *',
-                  prefixIcon: const Icon(Icons.category),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
+                  // ── Seção de horários (modo manual ou ciclo) ─────────────
+                  _buildSecaoHorarios(),
+
+                  const SizedBox(height: 20),
+
+                  // ── Informações Extras ───────────────────────────────────
+                  _labelTexto('Informações Extras:'),
+                  const SizedBox(height: 6),
+                  _campoTexto(
+                    controller: _observacoesController,
+                    hint: 'Ex: Tomar com água, antes das refeições...',
+                    maxLines: 3,
                   ),
-                  filled: true,
-                ),
-                items: TipoMedicamento.values.map((tipo) {
-                  return DropdownMenuItem(
-                    value: tipo,
-                    child: Row(
-                      children: [
-                        Text(tipo.icone, style: const TextStyle(fontSize: 18)),
-                        const SizedBox(width: 8),
-                        Text(tipo.nome),
-                      ],
+
+                  const SizedBox(height: 32),
+
+                  // ── ElevatedButton Adicionar ─────────────────────────────
+                  ElevatedButton(
+                    onPressed: _salvando ? null : _salvar,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppCores.longe,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      elevation: 0,
                     ),
-                  );
-                }).toList(),
-                onChanged: (tipo) {
-                  if (tipo != null) setState(() => _tipoSelecionado = tipo);
-                },
-                validator: (value) => value == null ? 'Selecione o tipo' : null,
-              ),
-
-              const SizedBox(height: 16),
-
-              // Observações
-              TextFormField(
-                controller: _observacoesController,
-                decoration: InputDecoration(
-                  labelText: 'Observações (opcional)',
-                  hintText: 'Ex: Tomar com água, antes das refeições...',
-                  prefixIcon: const Icon(Icons.notes),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
+                    child: _salvando
+                        ? const SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : Text(
+                            _editando ? 'Salvar Alterações' : 'Adicionar',
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                   ),
-                  filled: true,
-                ),
-                maxLines: 2,
-                textCapitalization: TextCapitalization.sentences,
+
+                  const SizedBox(height: 32),
+                ],
               ),
-
-              const SizedBox(height: 24),
-
-              // Seção de horários
-              _buildSecaoHorarios(theme),
-
-              const SizedBox(height: 32),
-
-              // Botão salvar - ElevatedButton
-              ElevatedButton.icon(
-                onPressed: _salvando ? null : _salvar,
-                icon: _salvando
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : Icon(_editando ? Icons.save : Icons.add_alarm),
-                label: Text(
-                  _salvando
-                      ? 'Salvando...'
-                      : _editando
-                      ? 'Salvar Alterações'
-                      : 'Adicionar Medicamento',
-                  style: const TextStyle(fontSize: 16),
-                ),
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  backgroundColor: theme.colorScheme.primary,
-                  foregroundColor: theme.colorScheme.onPrimary,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  elevation: 2,
-                ),
-              ),
-
-              const SizedBox(height: 24),
-            ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  Widget _buildHeader(ThemeData theme) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            theme.colorScheme.primaryContainer,
-            theme.colorScheme.secondaryContainer,
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(16),
+  // ─── Widgets auxiliares ───────────────────────────────────────────────────
+
+  Widget _labelTexto(String texto) {
+    return Text(
+      texto,
+      style: const TextStyle(
+        fontWeight: FontWeight.w600,
+        fontSize: 14,
+        color: Color(0xFF37474F),
       ),
-      child: Row(
+    );
+  }
+
+  /// TextFormField com fundo verde-claro do wireframe
+  Widget _campoTexto({
+    required TextEditingController controller,
+    String? hint,
+    int maxLines = 1,
+    String? Function(String?)? validator,
+  }) {
+    return TextFormField(
+      controller: controller,
+      maxLines: maxLines,
+      validator: validator,
+      decoration: InputDecoration(
+        hintText: hint,
+        hintStyle: const TextStyle(color: Color(0xFF90A4AE)),
+        filled: true,
+        fillColor: const Color(0xFFB2DFDB),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide.none,
+        ),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: 12,
+        ),
+      ),
+    );
+  }
+
+  /// DropdownButtonFormField — modo de agendamento (frequência)
+  Widget _dropdownModo() {
+    return DropdownButtonFormField<ModoAgendamento>(
+      value: _modoAgendamento,
+      decoration: InputDecoration(
+        labelText: 'Frequência utilizado',
+        labelStyle: const TextStyle(fontSize: 12),
+        filled: true,
+        fillColor: const Color(0xFFB2DFDB),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide.none,
+        ),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: 10,
+        ),
+      ),
+      items: const [
+        DropdownMenuItem(
+          value: ModoAgendamento.manual,
+          child: Text('Horários fixos', style: TextStyle(fontSize: 13)),
+        ),
+        DropdownMenuItem(
+          value: ModoAgendamento.ciclo,
+          child: Text('Por ciclo', style: TextStyle(fontSize: 13)),
+        ),
+      ],
+      onChanged: (v) {
+        if (v != null) setState(() => _modoAgendamento = v);
+      },
+    );
+  }
+
+  /// DropdownButtonFormField — tipo de medicamento
+  Widget _dropdownTipo() {
+    return DropdownButtonFormField<TipoMedicamento>(
+      value: _tipoSelecionado,
+      decoration: InputDecoration(
+        labelText: 'Tipo de Medicamento',
+        labelStyle: const TextStyle(fontSize: 12),
+        filled: true,
+        fillColor: const Color(0xFFB2DFDB),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide.none,
+        ),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: 10,
+        ),
+      ),
+      items: TipoMedicamento.values.map((tipo) {
+        return DropdownMenuItem(
+          value: tipo,
+          child: Row(
+            children: [
+              Text(tipo.icone),
+              const SizedBox(width: 6),
+              Text(tipo.nome, style: const TextStyle(fontSize: 13)),
+            ],
+          ),
+        );
+      }).toList(),
+      onChanged: (v) {
+        if (v != null) setState(() => _tipoSelecionado = v);
+      },
+    );
+  }
+
+  Widget _buildSecaoHorarios() {
+    if (_modoAgendamento == ModoAgendamento.ciclo) {
+      return _buildSecaoCiclo();
+    }
+    return _buildSecaoManual();
+  }
+
+  /// Seção modo ciclo: primeira dose + intervalo
+  Widget _buildSecaoCiclo() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFB2DFDB),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Image.asset para a imagem decorativa do formulário
-          Image.asset(
-            'assets/images/medicine_banner.png',
-            width: 64,
-            height: 64,
-            errorBuilder: (context, error, stackTrace) => Icon(
-              Icons.health_and_safety,
-              size: 56,
-              color: theme.colorScheme.primary,
+          const Text(
+            'Configurar ciclo de doses',
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF37474F),
             ),
           ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  _editando ? 'Editar Medicamento' : 'Cadastrar Medicamento',
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: theme.colorScheme.onPrimaryContainer,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Preencha os dados e configure os horários dos alarmes',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onPrimaryContainer.withValues(
-                      alpha: 0.8,
-                    ),
-                  ),
-                ),
-              ],
-            ),
+          const SizedBox(height: 14),
+
+          // Seletor visual da primeira dose — display estilo digital + relógio
+          _buildSeletorHoraVisual(),
+
+          const SizedBox(height: 16),
+
+          // Intervalo entre doses
+          Row(
+            children: [
+              const Text(
+                'Repetir a cada',
+                style: TextStyle(fontWeight: FontWeight.w500),
+              ),
+              const SizedBox(width: 10),
+              DropdownButton<int>(
+                value: _intervaloHoras,
+                underline: const SizedBox(),
+                items: _frequencias.map((h) {
+                  return DropdownMenuItem(
+                    value: h,
+                    child: Text('$h hora${h > 1 ? 's' : ''}'),
+                  );
+                }).toList(),
+                onChanged: (v) {
+                  if (v != null) setState(() => _intervaloHoras = v);
+                },
+              ),
+            ],
           ),
+
+          if (_primeiraDose != null) ...[
+            const SizedBox(height: 10),
+            _chipPreview(),
+          ],
         ],
       ),
     );
   }
 
-  Widget _buildSecaoHorarios(ThemeData theme) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+  /// Seção modo manual: lista de horários adicionados
+  Widget _buildSecaoManual() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFB2DFDB),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'Horários dos alarmes',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF37474F),
+                ),
+              ),
+              TextButton.icon(
+                onPressed: _selecionarHorario,
+                icon: const Icon(Icons.add_alarm, color: AppCores.longe),
+                label: const Text(
+                  'Adicionar',
+                  style: TextStyle(color: AppCores.longe),
+                ),
+              ),
+            ],
+          ),
+
+          // showTimePicker é acionado pelo botão acima
+          if (_horarios.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 16),
+              child: Center(
+                child: Text(
+                  'Nenhum horário adicionado',
+                  style: TextStyle(color: Color(0xFF78909C)),
+                ),
+              ),
+            )
+          else
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: _horarios.map((h) {
+                return Chip(
+                  backgroundColor: AppCores.longe,
+                  label: Text(
+                    DateFormat('HH:mm').format(h),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  deleteIcon: const Icon(
+                    Icons.close,
+                    size: 16,
+                    color: Colors.white,
+                  ),
+                  onDeleted: () => setState(() => _horarios.remove(h)),
+                );
+              }).toList(),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// Display digital estilo wireframe (00 : 00 com relógio analógico ao lado)
+  Widget _buildSeletorHoraVisual() {
+    final hora = _primeiraDose != null
+        ? DateFormat('HH').format(_primeiraDose!)
+        : '--';
+    final minuto = _primeiraDose != null
+        ? DateFormat('mm').format(_primeiraDose!)
+        : '--';
+
+    return GestureDetector(
+      onTap: _selecionarHorario,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: AppCores.longe,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text(
-              'Horários dos Alarmes',
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.bold,
+            // Display digital
+            _digitoDisplay(hora),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 6),
+              child: Text(
+                ':',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 36,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
-            TextButton.icon(
-              onPressed: _adicionarHorario,
-              icon: const Icon(Icons.add_alarm),
-              label: const Text('Adicionar'),
+            _digitoDisplay(minuto),
+
+            const SizedBox(width: 20),
+
+            // Ícone de relógio analógico (referência ao showTimePicker)
+            Container(
+              width: 52,
+              height: 52,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.white.withValues(alpha: 0.2),
+              ),
+              child: const Icon(
+                Icons.watch_later_outlined,
+                color: Colors.white,
+                size: 30,
+              ),
+            ),
+
+            const SizedBox(width: 12),
+
+            // Ícone de imagem (câmera) — CircleAvatar decorativo como no wireframe
+            CircleAvatar(
+              radius: 20,
+              backgroundColor: Colors.white.withValues(alpha: 0.2),
+              child: const Icon(
+                Icons.image_outlined,
+                color: Colors.white,
+                size: 22,
+              ),
             ),
           ],
         ),
+      ),
+    );
+  }
 
-        const SizedBox(height: 8),
+  Widget _digitoDisplay(String valor) {
+    return Container(
+      width: 64,
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.2),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        valor,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 34,
+          fontWeight: FontWeight.bold,
+          letterSpacing: 2,
+        ),
+      ),
+    );
+  }
 
-        if (_horarios.isEmpty)
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              border: Border.all(color: theme.colorScheme.outline),
-              borderRadius: BorderRadius.circular(12),
-              color: theme.colorScheme.surfaceContainerHighest,
-            ),
-            child: Column(
-              children: [
-                Icon(
-                  Icons.alarm_off,
-                  size: 40,
-                  color: theme.colorScheme.outline,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Nenhum horário adicionado',
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: theme.colorScheme.outline,
+  /// Chips mostrando as próximas X doses do ciclo
+  Widget _chipPreview() {
+    if (_primeiraDose == null) return const SizedBox.shrink();
+
+    final doses = <String>[];
+    DateTime atual = _primeiraDose!;
+    for (int i = 0; i < 4; i++) {
+      doses.add(DateFormat('HH:mm').format(atual));
+      atual = atual.add(Duration(hours: _intervaloHoras));
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Próximas doses:',
+          style: TextStyle(fontSize: 12, color: Color(0xFF546E7A)),
+        ),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 6,
+          children: doses
+              .map(
+                (d) => Chip(
+                  backgroundColor: Colors.white.withValues(alpha: 0.5),
+                  label: Text(
+                    d,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
                   ),
+                  padding: EdgeInsets.zero,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
-              ],
-            ),
-          )
-        else
-          ...List.generate(_horarios.length, (index) {
-            final horario = _horarios[index];
-            return Card(
-              margin: const EdgeInsets.only(bottom: 8),
-              child: ListTile(
-                leading: CircleAvatar(
-                  backgroundColor: theme.colorScheme.tertiaryContainer,
-                  child: Icon(
-                    Icons.alarm,
-                    color: theme.colorScheme.onTertiaryContainer,
-                  ),
-                ),
-                title: Text(
-                  DateFormat('HH:mm').format(horario),
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: theme.colorScheme.tertiary,
-                  ),
-                ),
-                subtitle: Text(
-                  'Alarme ${index + 1}',
-                  style: theme.textTheme.bodySmall,
-                ),
-                trailing: IconButton(
-                  icon: const Icon(Icons.close),
-                  onPressed: () => _removerHorario(index),
-                  tooltip: 'Remover horário',
-                ),
-              ),
-            );
-          }),
+              )
+              .toList(),
+        ),
       ],
     );
   }
