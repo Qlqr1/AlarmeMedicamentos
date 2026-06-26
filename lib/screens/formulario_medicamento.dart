@@ -214,7 +214,7 @@ class _FormularioMedicamentoState extends State<FormularioMedicamento> {
       backgroundColor: AppCores.fundo,
       appBar: AppBar(
         backgroundColor: AppCores.appBar,
-        foregroundColor: Colors.white,
+        foregroundColor: Colors.black,
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
@@ -229,7 +229,7 @@ class _FormularioMedicamentoState extends State<FormularioMedicamento> {
               height: 64,
               errorBuilder: (_, __, ___) => const Icon(
                 Icons.health_and_safety,
-                color: Colors.white,
+                color: Colors.black,
                 size: 48,
               ),
             ),
@@ -296,7 +296,7 @@ class _FormularioMedicamentoState extends State<FormularioMedicamento> {
                     onPressed: _salvando ? null : _salvar,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppCores.longe,
-                      foregroundColor: Colors.white,
+                      foregroundColor: Colors.black,
                       padding: const EdgeInsets.symmetric(vertical: 16),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
@@ -309,7 +309,7 @@ class _FormularioMedicamentoState extends State<FormularioMedicamento> {
                             width: 20,
                             child: CircularProgressIndicator(
                               strokeWidth: 2,
-                              color: Colors.white,
+                              color: Colors.black,
                             ),
                           )
                         : Text(
@@ -653,7 +653,7 @@ class _FormularioMedicamentoState extends State<FormularioMedicamento> {
       width: 64,
       padding: const EdgeInsets.symmetric(vertical: 8),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.2),
+        color: const Color.fromARGB(255, 255, 254, 254).withValues(alpha: 0.2),
         borderRadius: BorderRadius.circular(8),
       ),
       alignment: Alignment.center,
@@ -693,7 +693,7 @@ class _FormularioMedicamentoState extends State<FormularioMedicamento> {
           children: doses
               .map(
                 (d) => Chip(
-                  backgroundColor: Colors.white.withValues(alpha: 0.5),
+                  backgroundColor: const Color.fromARGB(255, 120, 119, 119).withValues(alpha: 0.5),
                   label: Text(
                     d,
                     style: const TextStyle(
