@@ -1,26 +1,45 @@
+import 'dart:async';
+
 import 'package:alarm/alarm.dart';
-import '../models/medicamento.dart';
+import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
+import 'alarm_impl/web_notifier.dart';
+import 'medicamento.dart';
+import 'medicamentos_provider.dart';
 
 class AlarmService {
+  static GlobalKey<NavigatorState>? navigatorKey;
+
+  // Só usados na Web, onde o pacote `alarm` não tem implementação: um
+  // Timer por alarme dispara o som (via audioplayers) e uma notificação
+  // real do navegador quando a aba está aberta.
+  static final Map<int, Timer> _webTimers = {};
+  static final AudioPlayer _webPlayer = AudioPlayer();
+
   static Future<void> inicializar() async {
+    if (kIsWeb) {
+      await WebNotifier.requestPermission();
+      return;
+    }
     await Alarm.init();
   }
 
-  /// Agenda o(s) alarme(s) de um medicamento, de acordo com o modo:
-  /// - manual: um alarme fixo por horário da lista.
-  /// - ciclo: um único alarme para a PRÓXIMA dose. Quando ele disparar,
-  ///   [reagendarProximoCiclo] deve ser chamado para calcular e agendar
-  ///   a dose seguinte, substituindo a anterior.
   static Future<void> agendarAlarmes(Medicamento medicamento) async {
     if (!medicamento.ativo) return;
+
+    if (kIsWeb) {
+      await _agendarAlarmesWeb(medicamento);
+      return;
+    }
 
     if (medicamento.modoAgendamento == ModoAgendamento.ciclo) {
       await _agendarProximaDoseDoCiclo(medicamento);
       return;
     }
 
-    // Modo manual: um alarme por horário, todos com IDs derivados
-    // de alarmId + índice, como antes.
     for (int i = 0; i < medicamento.horarios.length; i++) {
       final horario = medicamento.horarios[i];
       final alarmId = medicamento.alarmId + i;
@@ -33,17 +52,12 @@ class AlarmService {
     }
   }
 
-  /// Agenda apenas a próxima dose do ciclo (sempre no [medicamento.alarmId],
-  /// já que no modo ciclo só existe UM alarme "vivo" por vez).
   static Future<void> _agendarProximaDoseDoCiclo(
     Medicamento medicamento,
   ) async {
     final proxima =
         medicamento.proximaDoseCalculada ?? medicamento.primeiraDose!;
 
-    // Se a dose calculada já passou (app ficou fechado por um tempo),
-    // avança o ciclo quantas vezes forem necessárias até achar uma
-    // data futura, em vez de disparar várias notificações atrasadas.
     DateTime alvo = proxima;
     final agora = DateTime.now();
     while (alvo.isBefore(agora)) {
@@ -68,32 +82,21 @@ class AlarmService {
       assetAudioPath: 'assets/alarm.mp3',
       loopAudio: true,
       vibrate: true,
-      volume: 0.8,
-      fadeDuration: 3.0,
-      warningNotificationOnKill: true,
-      androidFullScreenIntent: true,
-      notificationSettings: NotificationSettings(
-        title: '💊 ${medicamento.nome}',
-        body: '${medicamento.dosagem} — Hora de tomar seu medicamento!',
+      volume: 1.0,
+      fadeDuration: 0.0,
+      notificationSettings: const NotificationSettings(
+        title: 'Alarme de Medicamento',
+        body: 'Hora de tomar seu medicamento!',
         stopButton: 'Dispensar',
-        icon: 'notification_icon',
+        icon: 'ic_launcher',
       ),
     );
 
     await Alarm.set(alarmSettings: alarmSettings);
+    // ignore: avoid_print
+    print('[AlarmService] Alarme $id agendado para $dateTime');
   }
 
-  /// Chamar quando o alarme de um medicamento em modo ciclo dispara
-  /// (ou quando a pessoa toca "Tomei"/"Dispensar" na notificação).
-  ///
-  /// Calcula a próxima dose a partir da que acabou de disparar e
-  /// AGENDA NO LUGAR DELA — não acumula alarmes, sempre existe só
-  /// um próximo, exatamente como descrito: "salva a última dosagem
-  /// e vai adicionando o tempo para criar a próxima, substituindo
-  /// a anterior".
-  ///
-  /// Retorna o medicamento atualizado com a nova [proximaDoseCalculada]
-  /// — quem chamar deve persistir esse retorno no provider.
   static Future<Medicamento> reagendarProximoCiclo(
     Medicamento medicamento,
   ) async {
@@ -101,10 +104,11 @@ class AlarmService {
       return medicamento;
     }
 
-    // Para o alarme atual antes de criar o próximo (mesmo ID será
-    // reutilizado, mas isso garante que não fique nada "pendurado"
-    // em plataformas que não sobrescrevem automaticamente).
-    await Alarm.stop(medicamento.alarmId);
+    if (kIsWeb) {
+      _webTimers.remove(medicamento.alarmId)?.cancel();
+    } else {
+      await Alarm.stop(medicamento.alarmId);
+    }
 
     final doseAnterior =
         medicamento.proximaDoseCalculada ?? medicamento.primeiraDose!;
@@ -114,53 +118,161 @@ class AlarmService {
 
     final atualizado = medicamento.copyWith(proximaDoseCalculada: proximaDose);
 
-    await _criarAlarme(
-      id: atualizado.alarmId,
-      dateTime: proximaDose,
-      medicamento: atualizado,
-    );
+    if (kIsWeb) {
+      _agendarTimerWeb(
+        id: atualizado.alarmId,
+        dateTime: proximaDose,
+        medicamento: atualizado,
+      );
+    } else {
+      await _criarAlarme(
+        id: atualizado.alarmId,
+        dateTime: proximaDose,
+        medicamento: atualizado,
+      );
+    }
 
     return atualizado;
   }
 
-  /// Cancela todos os alarmes de um medicamento (manual ou ciclo).
   static Future<void> cancelarAlarmes(Medicamento medicamento) async {
+    if (kIsWeb) {
+      if (medicamento.modoAgendamento == ModoAgendamento.ciclo) {
+        _webTimers.remove(medicamento.alarmId)?.cancel();
+      } else {
+        for (int i = 0; i < medicamento.horarios.length; i++) {
+          _webTimers.remove(medicamento.alarmId + i)?.cancel();
+        }
+      }
+      return;
+    }
     if (medicamento.modoAgendamento == ModoAgendamento.ciclo) {
       await Alarm.stop(medicamento.alarmId);
       return;
     }
     for (int i = 0; i < medicamento.horarios.length; i++) {
-      final alarmId = medicamento.alarmId + i;
-      await Alarm.stop(alarmId);
+      await Alarm.stop(medicamento.alarmId + i);
     }
   }
 
-  /// Calcula o próximo disparo diário a partir de um horário (modo manual).
   static DateTime _proximoDisparoDiario(DateTime horario) {
     final agora = DateTime.now();
     DateTime candidato = DateTime(
-      agora.year,
-      agora.month,
-      agora.day,
-      horario.hour,
-      horario.minute,
-      0,
+      agora.year, agora.month, agora.day, horario.hour, horario.minute, 0,
     );
-
     if (candidato.isBefore(agora)) {
       candidato = candidato.add(const Duration(days: 1));
     }
-
     return candidato;
   }
 
-  /// Para o alarme que está tocando agora.
   static Future<void> dispensarAlarme(int alarmId) async {
+    if (kIsWeb) {
+      _webTimers.remove(alarmId)?.cancel();
+      await _webPlayer.stop();
+      return;
+    }
     await Alarm.stop(alarmId);
   }
 
-  /// Verifica se um alarme está ativo.
   static Future<bool> alarmEstaAtivo(int alarmId) async {
-    return Alarm.getAlarm(alarmId) != null;
+    if (kIsWeb) return _webTimers.containsKey(alarmId);
+    return Alarm.getAlarm(alarmId) is AlarmSettings;
+  }
+
+  // --- Implementação Web: Timer + audioplayers + Notification API ---
+
+  static Future<void> _agendarAlarmesWeb(Medicamento medicamento) async {
+    await WebNotifier.requestPermission();
+
+    if (medicamento.modoAgendamento == ModoAgendamento.ciclo) {
+      final proxima =
+          medicamento.proximaDoseCalculada ?? medicamento.primeiraDose!;
+      DateTime alvo = proxima;
+      final agora = DateTime.now();
+      while (alvo.isBefore(agora)) {
+        alvo = alvo.add(Duration(hours: medicamento.intervaloHoras!));
+      }
+      _agendarTimerWeb(
+        id: medicamento.alarmId,
+        dateTime: alvo,
+        medicamento: medicamento,
+      );
+      return;
+    }
+
+    for (int i = 0; i < medicamento.horarios.length; i++) {
+      final alarmId = medicamento.alarmId + i;
+      final proximoDisparo = _proximoDisparoDiario(medicamento.horarios[i]);
+      _agendarTimerWeb(
+        id: alarmId,
+        dateTime: proximoDisparo,
+        medicamento: medicamento,
+      );
+    }
+  }
+
+  static void _agendarTimerWeb({
+    required int id,
+    required DateTime dateTime,
+    required Medicamento medicamento,
+  }) {
+    _webTimers.remove(id)?.cancel();
+    final espera = dateTime.difference(DateTime.now());
+    _webTimers[id] = Timer(espera.isNegative ? Duration.zero : espera, () {
+      _dispararAlarmeWeb(id: id, medicamento: medicamento);
+    });
+    // ignore: avoid_print
+    print('[AlarmService] (web) Alarme $id agendado para $dateTime');
+  }
+
+  static Future<void> _dispararAlarmeWeb({
+    required int id,
+    required Medicamento medicamento,
+  }) async {
+    _webTimers.remove(id);
+
+    try {
+      await _webPlayer.play(AssetSource('alarm.mp3'));
+    } catch (_) {}
+
+    WebNotifier.mostrar(
+      '💊 ${medicamento.nome}',
+      '${medicamento.dosagem} — Hora de tomar seu medicamento!',
+    );
+
+    final ctx = navigatorKey?.currentContext;
+    if (ctx == null || !ctx.mounted) return;
+
+    if (medicamento.modoAgendamento == ModoAgendamento.ciclo) {
+      ctx.read<MedicamentosProvider>().confirmarDoseDoCiclo(medicamento.id);
+    }
+
+    ScaffoldMessenger.of(ctx).showSnackBar(
+      SnackBar(
+        duration: const Duration(minutes: 2),
+        backgroundColor: const Color(0xFF5BBDB5),
+        content: Row(
+          children: [
+            const Icon(Icons.alarm, color: Colors.white, size: 20),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                '💊 ${medicamento.nome} — ${medicamento.dosagem}\nHora de tomar seu medicamento!',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        ),
+        action: SnackBarAction(
+          label: 'Dispensar',
+          textColor: Colors.white,
+          onPressed: () => _webPlayer.stop(),
+        ),
+      ),
+    );
   }
 }

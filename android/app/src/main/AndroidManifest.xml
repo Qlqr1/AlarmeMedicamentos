@@ -1,6 +1,5 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://android.com">
 
-    <!-- Permissões necessárias para o pacote alarm -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <uses-permission android:name="android.permission.VIBRATE"/>
@@ -39,28 +38,30 @@
             </intent-filter>
         </activity>
 
-        <!-- Serviço de alarme do pacote alarm -->
-        <service
-            android:name="dev.fluttercommunity.plus.androidalarmmanager.AlarmService"
-            android:permission="android.permission.BIND_JOB_SERVICE"
-            android:exported="false"/>
-
-        <receiver
-            android:name="dev.fluttercommunity.plus.androidalarmmanager.AlarmBroadcastReceiver"
-            android:exported="false"/>
-
-        <receiver
-            android:name="dev.fluttercommunity.plus.androidalarmmanager.RebootBroadcastReceiver"
-            android:enabled="false"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="android.intent.action.BOOT_COMPLETED"/>
-            </intent-filter>
-        </receiver>
-
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+
+        <service 
+            android:name="com.gdelataillade.alarm.services.NotificationOnKillService" />
+            
+        <service 
+            android:name="com.gdelataillade.alarm.services.AudioService"
+            android:foregroundServiceType="mediaPlayback"
+            android:exported="false" />
+            
+        <receiver 
+            android:name="com.gdelataillade.alarm.receivers.AlarmReceiver" 
+            android:exported="false" />
+            
+        <receiver 
+            android:name="com.gdelataillade.alarm.receivers.RebootReceiver" 
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
     </application>
 
     <queries>

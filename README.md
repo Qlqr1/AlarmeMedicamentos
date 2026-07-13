@@ -4,6 +4,20 @@ App multiplataforma para gerenciar medicamentos e configurar alarmes de dose, co
 
 ---
 
+## ✅ Pré-requisitos
+
+- [Flutter SDK](https://docs.flutter.dev/get-started/install) (channel `stable`) com Dart SDK `^3.9.2`
+- Um editor com suporte a Flutter (VS Code ou Android Studio)
+- Para rodar em dispositivo/emulador: Android Studio (Android) e/ou Xcode (iOS/macOS, apenas em Mac)
+
+Verifique se tudo está instalado corretamente:
+
+```bash
+flutter doctor
+```
+
+---
+
 ## 📁 Estrutura do Projeto
 
 ```
@@ -12,14 +26,20 @@ lib/
 ├── models/
 │   ├── medicamento.dart               # Model + TipoMedicamento enum
 │   ├── medicamentos_provider.dart     # Estado global (ChangeNotifier)
-│   └── alarm_service.dart             # Wrapper do pacote alarm
+│   ├── alarm_service.dart             # Wrapper do pacote alarm (mobile) + fallback Web
+│   └── alarm_impl/
+│       ├── web_notifier.dart          # Exporta a implementação certa por plataforma
+│       ├── web_notifier_web.dart      # Notificação nativa do navegador (Web)
+│       └── web_notifier_stub.dart     # Stub usado fora da Web
 ├── screens/
 │   ├── home_screen.dart               # Tela principal (ListView/GridView)
 │   └── formulario_medicamento.dart    # Cadastro/edição (Form completo)
 └── widgets/
-    └── medicamento_card.dart          # Card reutilizável com ListTile
+    ├── medicamento_card.dart          # Card reutilizável com ListTile
+    └── urgencia_cores.dart            # Cores de destaque conforme urgência da dose
 
 assets/
+├── alarm.mp3              # Som tocado ao disparar o alarme
 └── images/
     ├── app_logo.png          # Logo no AppBar
     ├── medicine_banner.png   # Banner no formulário
@@ -57,25 +77,32 @@ assets/
 
 ```yaml
 dependencies:
-  alarm: ^4.0.3                    # Alarmes nativos (principal)
-  shared_preferences: ^2.3.2      # Persistência local dos medicamentos
+  cupertino_icons: ^1.0.8          # Ícones estilo iOS
+  alarm: ^4.0.3                    # Alarmes nativos (Android/iOS/desktop)
+  shared_preferences: ^2.3.2       # Persistência local dos medicamentos
   provider: ^6.1.2                 # Gerenciamento de estado
   intl: ^0.19.0                    # Formatação de hora (HH:mm)
   uuid: ^4.5.1                     # IDs únicos para medicamentos
   permission_handler: ^11.3.1      # Solicitação de permissões
+  flutter_local_notifications: ^17.2.4  # Notificações locais (fallback desktop/web)
+  audioplayers: ^6.1.0             # Reprodução do som do alarme (usado no fallback Web)
+  local_notifier: ^0.1.6           # Notificações nativas em desktop (Windows/Linux/macOS)
+
+dev_dependencies:
+  flutter_lints: ^5.0.0            # Regras de lint recomendadas
+```
+
+Instale tudo com:
+
+```bash
+flutter pub get
 ```
 
 ---
 
 ## ⚙️ Configuração
 
-### 1. Instalar dependências
-
-```bash
-flutter pub get
-```
-
-### 2. Android — Permissões
+### 1. Android — Permissões
 
 O `AndroidManifest.xml` já inclui todas as permissões necessárias:
 - `SCHEDULE_EXACT_ALARM` / `USE_EXACT_ALARM`
@@ -85,7 +112,7 @@ O `AndroidManifest.xml` já inclui todas as permissões necessárias:
 
 **minSdk deve ser 23** (já configurado no `build.gradle.kts`).
 
-### 3. iOS — Background Modes
+### 2. iOS — Background Modes
 
 O `Info.plist` já tem:
 ```xml
@@ -95,7 +122,7 @@ O `Info.plist` já tem:
 </array>
 ```
 
-### 4. Adicionar imagens (opcional)
+### 3. Adicionar imagens (opcional)
 
 Coloque seus PNGs em `assets/images/`:
 - `app_logo.png` — ícone branco 32×32px para o AppBar
@@ -145,6 +172,14 @@ O `MediaQuery` detecta a largura da tela e alterna entre:
 ---
 
 ## 🚀 Executar
+
+Veja quais dispositivos/emuladores estão disponíveis:
+
+```bash
+flutter devices
+```
+
+Depois rode com:
 
 ```bash
 # Android

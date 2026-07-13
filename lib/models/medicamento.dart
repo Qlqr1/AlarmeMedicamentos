@@ -88,6 +88,8 @@ class Medicamento {
   final String? observacoes;
   final String? imagemPath;
   final bool ativo;
+  final bool ciclico;
+  final int? intervaloCiclicoMinutos;
   final int alarmId;
 
   Medicamento({
@@ -103,6 +105,8 @@ class Medicamento {
     this.observacoes,
     this.imagemPath,
     this.ativo = true,
+    this.ciclico = false,
+    this.intervaloCiclicoMinutos,
     required this.alarmId,
   }) : assert(
          modoAgendamento == ModoAgendamento.manual
@@ -146,6 +150,8 @@ class Medicamento {
     String? observacoes,
     String? imagemPath,
     bool? ativo,
+    bool? ciclico,
+    Object? intervaloCiclicoMinutos = _sentinel,
     int? alarmId,
   }) {
     return Medicamento(
@@ -163,9 +169,15 @@ class Medicamento {
       observacoes: observacoes ?? this.observacoes,
       imagemPath: imagemPath ?? this.imagemPath,
       ativo: ativo ?? this.ativo,
+      ciclico: ciclico ?? this.ciclico,
+      intervaloCiclicoMinutos: intervaloCiclicoMinutos == _sentinel
+          ? this.intervaloCiclicoMinutos
+          : intervaloCiclicoMinutos as int?,
       alarmId: alarmId ?? this.alarmId,
     );
   }
+
+  static const Object _sentinel = Object();
 
   Map<String, dynamic> toJson() {
     return {
@@ -181,6 +193,8 @@ class Medicamento {
       'observacoes': observacoes,
       'imagemPath': imagemPath,
       'ativo': ativo,
+      'ciclico': ciclico,
+      'intervaloCiclicoMinutos': intervaloCiclicoMinutos,
       'alarmId': alarmId,
     };
   }
@@ -209,6 +223,8 @@ class Medicamento {
       observacoes: json['observacoes'] as String?,
       imagemPath: json['imagemPath'] as String?,
       ativo: json['ativo'] as bool? ?? true,
+      ciclico: json['ciclico'] as bool? ?? false,
+      intervaloCiclicoMinutos: json['intervaloCiclicoMinutos'] as int?,
       alarmId: json['alarmId'] as int,
     );
   }

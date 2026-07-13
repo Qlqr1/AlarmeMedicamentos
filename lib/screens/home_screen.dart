@@ -13,13 +13,20 @@ class HomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
-    final isWeb = screenWidth > 720;
+    final isLandscape =
+        MediaQuery.of(context).orientation == Orientation.landscape;
 
-    int gridColunas = 2;
-    if (screenWidth > 1200)
+    // Grid apenas em landscape ou telas grandes (web/tablet)
+    int gridColunas = 0;
+    if (screenWidth >= 1400) {
       gridColunas = 4;
-    else if (screenWidth > 900)
+    } else if (screenWidth >= 1000) {
       gridColunas = 3;
+    } else if (isLandscape) {
+      gridColunas = 3;
+    }
+
+    final isGrid = gridColunas > 0;
 
     return Scaffold(
       backgroundColor: AppCores.fundo,
@@ -36,14 +43,14 @@ class HomeScreen extends StatelessWidget {
             return _buildEstadoVazio(context);
           }
 
-          if (isWeb) {
+          if (isGrid) {
             return GridView.builder(
-              padding: EdgeInsets.all(screenWidth > 900 ? 24 : 16),
+              padding: const EdgeInsets.all(10),
               gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: gridColunas,
-                crossAxisSpacing: 14,
-                mainAxisSpacing: 14,
-                childAspectRatio: 1.1,
+                crossAxisSpacing: 10,
+                mainAxisSpacing: 10,
+                childAspectRatio: 1.6,
               ),
               itemCount: medicamentos.length,
               itemBuilder: (context, index) {
@@ -58,7 +65,7 @@ class HomeScreen extends StatelessWidget {
             );
           }
 
-          // Mobile: ListView
+          // Mobile portrait: ListView
           return ListView.builder(
             padding: const EdgeInsets.only(top: 12, bottom: 100),
             itemCount: medicamentos.length,
@@ -85,8 +92,6 @@ class HomeScreen extends StatelessWidget {
   }
 
   PreferredSizeWidget _buildAppBar(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-
     return AppBar(
       backgroundColor: AppCores.appBar,
       elevation: 0,
@@ -99,12 +104,11 @@ class HomeScreen extends StatelessWidget {
           fontSize: 20,
         ),
       ),
-      // Image.asset no lado direito do AppBar — imagem decorativa do wireframe
       actions: [
         Padding(
           padding: const EdgeInsets.only(right: 12),
           child: Image.asset(
-            'assets/images/medicine_banner.png',
+            'assets/images/logo.png',
             height: 64,
             errorBuilder: (_, __, ___) => const Icon(
               Icons.health_and_safety,
@@ -123,7 +127,7 @@ class HomeScreen extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Image.asset(
-            'assets/images/empty_state.png',
+            'assets/images/logo.png',
             width: 160,
             errorBuilder: (_, __, ___) => const Icon(
               Icons.medical_services_outlined,
